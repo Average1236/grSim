@@ -103,6 +103,7 @@ public:
     double KickerHeight;
     double WheelRadius;
     double WheelThickness;
+    double WheelCenterDistance;
     double Wheel1Angle;
     double Wheel2Angle;
     double Wheel3Angle;
@@ -110,6 +111,9 @@ public:
     //physical settings
     double BodyMass;
     double WheelMass;
+    double RobotYawInertia;
+    double WheelAxialInertia;
+    double WheelViscousDamping;
     double KickerMass;
     double KickerDampFactor;
     double RollerTorqueFactor;

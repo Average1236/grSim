@@ -69,8 +69,6 @@ bool wheelCallBack(dGeomID o1,dGeomID o2,PSurface* s, int /*robots_count*/)
     }
 
     s->surface.mode = dContactFDir1 | dContactMu2  | dContactApprox1 | dContactSoftCFM;
-    s->surface.mu = fric(_w->cfg->robotSettings.WheelPerpendicularFriction);
-    s->surface.mu2 = fric(_w->cfg->robotSettings.WheelTangentFriction);
     s->surface.soft_cfm = 0.002;
 
     dVector3 v={0,0,1,1};
@@ -148,7 +146,7 @@ SSLWorld::SSLWorld(QGLWidget* parent,ConfigWidget* _cfg,RobotsFomation *form1,Ro
     g = new CGraphics(parent);
     g->setSphereQuality(1);
     g->setViewpoint(0,-(cfg->Field_Width()+cfg->Field_Margin()*2.0f)/2.0f,3,90,-45,0);
-    p = new PWorld(0.05,9.81f,g,cfg->Robots_Count());
+    p = new PWorld(0.05,cfg->Gravity(),g,cfg->Robots_Count());
     ball = new PBall (0,0,0.5,cfg->BallRadius(),cfg->BallMass(), 1,0.7,0);
 
     ground = new PGround(cfg->Field_Rad(),cfg->Field_Length(),cfg->Field_Width(),cfg->Field_Penalty_Depth(),cfg->Field_Penalty_Width(),cfg->Field_Penalty_Point(),cfg->Field_Line_Width(),0);
@@ -282,12 +280,15 @@ SSLWorld::SSLWorld(QGLWidget* parent,ConfigWidget* _cfg,RobotsFomation *form1,Ro
         for (auto & wall : walls) p->createSurface(robots[k]->chassis,wall);
         p->createSurface(robots[k]->dummy,ball);
         //p->createSurface(robots[k]->chassis,ball);
+        ballwithkicker.surface.mu = fric(robots[k]->settings.Kicker_Friction);
         p->createSurface(robots[k]->kicker->box,ball)->surface = ballwithkicker.surface;
         for (auto & wheel : robots[k]->wheels)
         {
             p->createSurface(wheel->cyl,ball);
             PSurface* w_g = p->createSurface(wheel->cyl,ground);
             w_g->surface=wheelswithground.surface;
+            w_g->surface.mu = fric(robots[k]->settings.WheelPerpendicularFriction);
+            w_g->surface.mu2 = fric(robots[k]->settings.WheelTangentFriction);
             w_g->usefdir1=true;
             w_g->callback=wheelCallBack;
         }
@@ -427,6 +428,8 @@ void SSLWorld::step(dReal dt)
         else last_dt = dt;
 
         selected = -1;
+        for (int k=0; k<cfg->Robots_Count()*2; ++k)
+            for (auto* wheel : robots[k]->wheels) wheel->applyDamping();
         p->step(dt/ballCollisionTry);
     }
 

@@ -17,6 +17,7 @@ Copyright (C) 2011, Parsian Robotic Center (eew.aut.ac.ir/~parsian/grsim)
 */
 
 #include "robot.h"
+#include <stdexcept>
 // #include <iostream>
 
 // ang2 = position angle
@@ -25,7 +26,7 @@ Robot::Wheel::Wheel(Robot* robot,int _id,dReal ang,dReal ang2,int wheeltexid)
 {
     id = _id;
     rob = robot;
-    dReal rad = rob->cfg->robotSettings.RobotRadius - rob->cfg->robotSettings.WheelThickness / 2.0;
+    dReal rad = rob->settings.WheelCenterDistance;
     ang *= M_PI/180.0f;
     ang2 *= M_PI/180.0f;
     dReal x = rob->m_x;
@@ -33,14 +34,24 @@ Robot::Wheel::Wheel(Robot* robot,int _id,dReal ang,dReal ang2,int wheeltexid)
     dReal z = rob->m_z;
     dReal centerx = x+rad*cos(ang2);
     dReal centery = y+rad*sin(ang2);
-    dReal centerz = z-rob->cfg->robotSettings.RobotHeight*0.5+rob->cfg->robotSettings.WheelRadius-rob->cfg->robotSettings.BottomHeight;
-    cyl = new PCylinder(centerx,centery,centerz,rob->cfg->robotSettings.WheelRadius,rob->cfg->robotSettings.WheelThickness,rob->cfg->robotSettings.WheelMass,0.9,0.9,0.9,wheeltexid);
+    dReal centerz = z-rob->settings.RobotHeight*0.5+rob->settings.WheelRadius-rob->settings.BottomHeight;
+    cyl = new PCylinder(centerx,centery,centerz,rob->settings.WheelRadius,rob->settings.WheelThickness,rob->settings.WheelMass,0.9,0.9,0.9,wheeltexid);
     cyl->setRotation(-sin(ang),cos(ang),0,M_PI*0.5);
     cyl->setBodyRotation(-sin(ang),cos(ang),0,M_PI*0.5,true);       //set local rotation matrix
     cyl->setBodyPosition(centerx-x,centery-y,centerz-z,true);       //set local position vector
     cyl->space = rob->space;
 
     rob->w->addObject(cyl);
+    if (rob->settings.WheelAxialInertia > 0) {
+        // ODE cylinder geometry spins about local Z. Preserve the mass and
+        // transverse moments, but use the measured axial moment of inertia.
+        dMass mass;
+        dMassSetCylinderTotal(&mass, rob->settings.WheelMass, 3,
+                             rob->settings.WheelRadius, rob->settings.WheelThickness);
+        mass.I[10] = rob->settings.WheelAxialInertia;
+        if (!dMassCheck(&mass)) throw std::runtime_error("Invalid wheel inertia");
+        dBodySetMass(cyl->body, &mass);
+    }
 
     joint = dJointCreateHinge (rob->w->world,0);
 
@@ -53,14 +64,22 @@ Robot::Wheel::Wheel(Robot* robot,int _id,dReal ang,dReal ang2,int wheeltexid)
     dJointAttach(motor,rob->chassis->body,cyl->body);
     dJointSetAMotorNumAxes(motor,1);
     dJointSetAMotorAxis(motor,0,1,cos(ang),sin(ang),0);
-    dJointSetAMotorParam(motor,dParamFMax,rob->cfg->robotSettings.Wheel_Motor_FMax);
+    dJointSetAMotorParam(motor,dParamFMax,rob->settings.Wheel_Motor_FMax);
     speed = 0;
 }
 
 void Robot::Wheel::step()
 {
     dJointSetAMotorParam(motor,dParamVel,speed);
-    dJointSetAMotorParam(motor,dParamFMax,rob->cfg->robotSettings.Wheel_Motor_FMax);
+    dJointSetAMotorParam(motor,dParamFMax,rob->settings.Wheel_Motor_FMax);
+}
+
+void Robot::Wheel::applyDamping()
+{
+    // Forces are cleared by ODE after each integration step. Apply this on
+    // every physics substep, using wheel speed relative to the chassis.
+    const dReal torque = -rob->settings.WheelViscousDamping * dJointGetHingeAngleRate(joint);
+    dJointAddHingeTorque(joint, torque);
 }
 
 Robot::Kicker::Kicker(Robot* robot) : holdingBall(false)
@@ -70,10 +89,10 @@ Robot::Kicker::Kicker(Robot* robot) : holdingBall(false)
     dReal x = rob->m_x;
     dReal y = rob->m_y;
     dReal z = rob->m_z;
-    dReal centerx = x+(rob->cfg->robotSettings.RobotCenterFromKicker+rob->cfg->robotSettings.KickerThickness);
+    dReal centerx = x+(rob->settings.RobotCenterFromKicker+rob->settings.KickerThickness);
     dReal centery = y;
-    dReal centerz = z-(rob->cfg->robotSettings.RobotHeight)*0.5f+rob->cfg->robotSettings.WheelRadius-rob->cfg->robotSettings.BottomHeight+rob->cfg->robotSettings.KickerZ;
-    box = new PBox(centerx,centery,centerz,rob->cfg->robotSettings.KickerThickness,rob->cfg->robotSettings.KickerWidth,rob->cfg->robotSettings.KickerHeight,rob->cfg->robotSettings.KickerMass,0.9,0.9,0.9);
+    dReal centerz = z-(rob->settings.RobotHeight)*0.5f+rob->settings.WheelRadius-rob->settings.BottomHeight+rob->settings.KickerZ;
+    box = new PBox(centerx,centery,centerz,rob->settings.KickerThickness,rob->settings.KickerWidth,rob->settings.KickerHeight,rob->settings.KickerMass,0.9,0.9,0.9);
     box->setBodyPosition(centerx-x,centery-y,centerz-z,true);
     box->space = rob->space;
 
@@ -121,12 +140,12 @@ bool Robot::Kicker::isTouchingBall()
     rob->chassis->getBodyDirection(vx,vy,vz);
     rob->getBall()->getBodyPosition(bx,by,bz);
     box->getBodyPosition(kx,ky,kz);
-    kx += vx*rob->cfg->robotSettings.KickerThickness*0.5f;
-    ky += vy*rob->cfg->robotSettings.KickerThickness*0.5f;
+    kx += vx*rob->settings.KickerThickness*0.5f;
+    ky += vy*rob->settings.KickerThickness*0.5f;
     dReal xx = fabs((kx-bx)*vx + (ky-by)*vy);
     dReal yy = fabs(-(kx-bx)*vy + (ky-by)*vx);
     dReal zz = fabs(kz-bz);
-    return ((xx<rob->cfg->robotSettings.KickerThickness*2.0f+rob->cfg->BallRadius()) && (yy<rob->cfg->robotSettings.KickerWidth*0.5f) && (zz<rob->cfg->robotSettings.KickerHeight*0.5f));
+    return ((xx<rob->settings.KickerThickness*2.0f+rob->cfg->BallRadius()) && (yy<rob->settings.KickerWidth*0.5f) && (zz<rob->settings.KickerHeight*0.5f));
 }
 
 KickStatus Robot::Kicker::isKicking()
@@ -166,7 +185,7 @@ void Robot::Kicker::kick(dReal kickspeedx, dReal kickspeedz)
         vy = dy*kickspeedx/dlen;
         vz = zf;
         const dReal* vball = dBodyGetLinearVel(rob->getBall()->body);
-        dReal vn = -(vball[0]*dx + vball[1]*dy)*rob->cfg->robotSettings.KickerDampFactor;
+        dReal vn = -(vball[0]*dx + vball[1]*dy)*rob->settings.KickerDampFactor;
         dReal vt = -(vball[0]*dy - vball[1]*dx);
         vx += vn * dx - vt * dy;
         vy += vn * dy + vt * dx;
@@ -186,8 +205,8 @@ void Robot::Kicker::holdBall(){
     rob->chassis->getBodyDirection(vx,vy,vz);
     rob->getBall()->getBodyPosition(bx,by,bz);
     box->getBodyPosition(kx,ky,kz);
-    kx += vx*rob->cfg->robotSettings.KickerThickness*0.5f;
-    ky += vy*rob->cfg->robotSettings.KickerThickness*0.5f;
+    kx += vx*rob->settings.KickerThickness*0.5f;
+    ky += vy*rob->settings.KickerThickness*0.5f;
     dReal xx = fabs((kx-bx)*vx + (ky-by)*vy);
     dReal yy = fabs(-(kx-bx)*vy + (ky-by)*vx);
     if(holdingBall || xx-rob->cfg->BallRadius() < 0) return;
@@ -220,15 +239,16 @@ Robot::Robot(PWorld* world,PBall *ball,ConfigWidget* _cfg,dReal x,dReal y,dReal 
     m_ball = ball;
     m_dir = dir;
     cfg = _cfg;
+    settings = cfg->robotSettings;
     m_rob_id = rob_id;
 
     space = w->space;
 
-    chassis = new PCylinder(x,y,z,cfg->robotSettings.RobotRadius,cfg->robotSettings.RobotHeight,cfg->robotSettings.BodyMass*0.99f,r,g,b,rob_id,true);
+    chassis = new PCylinder(x,y,z,settings.RobotRadius,settings.RobotHeight,settings.BodyMass*0.99f,r,g,b,rob_id,true);
     chassis->space = space;
     w->addObject(chassis);
 
-    dummy   = new PBall(x,y,z,cfg->robotSettings.RobotCenterFromKicker,cfg->robotSettings.BodyMass*0.01f,0,0,0);
+    dummy   = new PBall(x,y,z,settings.RobotCenterFromKicker,settings.BodyMass*0.01f,0,0,0);
     dummy->setVisibility(false);
     dummy->space = space;
     w->addObject(dummy);
@@ -238,10 +258,37 @@ Robot::Robot(PWorld* world,PBall *ball,ConfigWidget* _cfg,dReal x,dReal y,dReal 
 
     kicker = new Kicker(this);
 
-    wheels[0] = new Wheel(this,0,cfg->robotSettings.Wheel1Angle,cfg->robotSettings.Wheel1Angle,wheeltexid);
-    wheels[1] = new Wheel(this,1,cfg->robotSettings.Wheel2Angle,cfg->robotSettings.Wheel2Angle,wheeltexid);
-    wheels[2] = new Wheel(this,2,cfg->robotSettings.Wheel3Angle,cfg->robotSettings.Wheel3Angle,wheeltexid);
-    wheels[3] = new Wheel(this,3,cfg->robotSettings.Wheel4Angle,cfg->robotSettings.Wheel4Angle,wheeltexid);
+    wheels[0] = new Wheel(this,0,settings.Wheel1Angle,settings.Wheel1Angle,wheeltexid);
+    wheels[1] = new Wheel(this,1,settings.Wheel2Angle,settings.Wheel2Angle,wheeltexid);
+    wheels[2] = new Wheel(this,2,settings.Wheel3Angle,settings.Wheel3Angle,wheeltexid);
+    wheels[3] = new Wheel(this,3,settings.Wheel4Angle,settings.Wheel4Angle,wheeltexid);
+    if (settings.RobotYawInertia > 0) {
+        // Match the assembled robot's yaw inertia about its centre of mass,
+        // subtracting wheel/kicker/dummy contributions rather than assigning
+        // the entire robot inertia to the chassis alone.
+        dMass chassisMass;
+        dMassSetCylinderTotal(&chassisMass, settings.BodyMass * 0.99, 3,
+                             settings.RobotRadius, settings.RobotHeight);
+        dBodySetMass(chassis->body, &chassisMass);
+        dMass total;
+        dMassSetZero(&total);
+        const dBodyID bodies[] = {chassis->body, dummy->body, kicker->box->body,
+            wheels[0]->cyl->body, wheels[1]->cyl->body,
+            wheels[2]->cyl->body, wheels[3]->cyl->body};
+        for (dBodyID body : bodies) {
+            dMass mass;
+            dBodyGetMass(body, &mass);
+            dMassRotate(&mass, dBodyGetRotation(body));
+            const dReal* pos = dBodyGetPosition(body);
+            dMassTranslate(&mass, pos[0]-x, pos[1]-y, pos[2]-z);
+            dMassAdd(&total, &mass);
+        }
+        dMassTranslate(&total, -total.c[0], -total.c[1], -total.c[2]);
+        chassisMass.I[10] += settings.RobotYawInertia - total.I[10];
+        if (!dMassCheck(&chassisMass))
+            throw std::runtime_error("Robot yaw inertia is incompatible with component masses");
+        dBodySetMass(chassis->body, &chassisMass);
+    }
     firsttime=true;
     on = true;
 }
@@ -325,7 +372,7 @@ void Robot::drawLabel()
     normalizeVector(rx,ry,rz);
     dReal zz = fx*ax + fy*ay + fz*az;
     dReal zfact = zz/fr_n;
-    pos[2] += cfg->robotSettings.RobotHeight*0.5f + cfg->robotSettings.BottomHeight + cfg->robotSettings.WheelRadius + txtHeight*zfact;
+    pos[2] += settings.RobotHeight*0.5f + settings.BottomHeight + settings.WheelRadius + txtHeight*zfact;
     dMatrix3 rot;
     dRFromAxisAndAngle(rot,0,0,0,0);
     dReal tx = fy*rz-ry*fz;
@@ -405,7 +452,7 @@ dReal Robot::getDir(dReal &k)
 void Robot::setXY(dReal x,dReal y)
 {
     dReal xx,yy,zz,kx,ky,kz;
-    dReal height = ROBOT_START_Z(cfg);
+    dReal height = settings.RobotHeight*0.5 + settings.WheelRadius*1.1 + settings.BottomHeight;
     chassis->getBodyPosition(xx,yy,zz);
     chassis->setBodyPosition(x,y,height);
     dummy->setBodyPosition(x,y,height);
@@ -483,12 +530,12 @@ void Robot::setSpeed(dReal vx, dReal vy, dReal vw, bool use_dir, int id)
     // if(id == 6) 
     //     // std::cout<<" target angle: "<< vw << "state: " << getDir()/180.0f*M_PI << "vw: " << vw << "delta_dir" << delta_dir << "diff_dir" << diff_dir << std::endl;
     //     std::cout<< " " << getDir()/180.0f*M_PI << " " << vw << " " << delta_dir << " " << diff_dir << std::endl;
-    dReal motorAlpha[4] = {cfg->robotSettings.Wheel1Angle * _DEG2RAD, cfg->robotSettings.Wheel2Angle * _DEG2RAD, cfg->robotSettings.Wheel3Angle * _DEG2RAD, cfg->robotSettings.Wheel4Angle * _DEG2RAD};
+    dReal motorAlpha[4] = {settings.Wheel1Angle * _DEG2RAD, settings.Wheel2Angle * _DEG2RAD, settings.Wheel3Angle * _DEG2RAD, settings.Wheel4Angle * _DEG2RAD};
 
-    dReal dw1 =  (1.0 / cfg->robotSettings.WheelRadius) * (( (cfg->robotSettings.RobotRadius * vw) - (vx * sin(motorAlpha[0])) + (vy * cos(motorAlpha[0]))) );
-    dReal dw2 =  (1.0 / cfg->robotSettings.WheelRadius) * (( (cfg->robotSettings.RobotRadius * vw) - (vx * sin(motorAlpha[1])) + (vy * cos(motorAlpha[1]))) );
-    dReal dw3 =  (1.0 / cfg->robotSettings.WheelRadius) * (( (cfg->robotSettings.RobotRadius * vw) - (vx * sin(motorAlpha[2])) + (vy * cos(motorAlpha[2]))) );
-    dReal dw4 =  (1.0 / cfg->robotSettings.WheelRadius) * (( (cfg->robotSettings.RobotRadius * vw) - (vx * sin(motorAlpha[3])) + (vy * cos(motorAlpha[3]))) );
+    dReal dw1 =  (1.0 / settings.WheelRadius) * (( (settings.WheelCenterDistance * vw) - (vx * sin(motorAlpha[0])) + (vy * cos(motorAlpha[0]))) );
+    dReal dw2 =  (1.0 / settings.WheelRadius) * (( (settings.WheelCenterDistance * vw) - (vx * sin(motorAlpha[1])) + (vy * cos(motorAlpha[1]))) );
+    dReal dw3 =  (1.0 / settings.WheelRadius) * (( (settings.WheelCenterDistance * vw) - (vx * sin(motorAlpha[2])) + (vy * cos(motorAlpha[2]))) );
+    dReal dw4 =  (1.0 / settings.WheelRadius) * (( (settings.WheelCenterDistance * vw) - (vx * sin(motorAlpha[3])) + (vy * cos(motorAlpha[3]))) );
 
     setSpeed(0 , dw1);
     setSpeed(1 , dw2);

@@ -240,6 +240,9 @@ void ConfigWidget::loadRobotSettings(QString team)
     robotSettings.KickerHeight = robot_settings->value("Geometery/KickerHeight", 0.04).toDouble();
     robotSettings.WheelRadius = robot_settings->value("Geometery/WheelRadius", 0.0325).toDouble();
     robotSettings.WheelThickness = robot_settings->value("Geometery/WheelThickness", 0.005).toDouble();
+    // Keep legacy profiles unchanged unless a measured wheel-centre radius is supplied.
+    robotSettings.WheelCenterDistance = robot_settings->value("Geometery/WheelCenterDistance",
+        robotSettings.RobotRadius - robotSettings.WheelThickness / 2.0).toDouble();
     robotSettings.Wheel1Angle = robot_settings->value("Geometery/Wheel1Angle", 60).toDouble();
     robotSettings.Wheel2Angle = robot_settings->value("Geometery/Wheel2Angle", 135).toDouble();
     robotSettings.Wheel3Angle = robot_settings->value("Geometery/Wheel3Angle", 225).toDouble();
@@ -248,6 +251,13 @@ void ConfigWidget::loadRobotSettings(QString team)
     robotSettings.BodyMass = robot_settings->value("Physics/BodyMass", 2).toDouble();
     robotSettings.WheelMass = robot_settings->value("Physics/WheelMass", 0.2).toDouble();
     robotSettings.KickerMass = robot_settings->value("Physics/KickerMass", 0.02).toDouble();
+    // RobotMass includes the chassis, hidden collision body, all four wheels and kicker.
+    if (robot_settings->contains("Physics/RobotMass"))
+        robotSettings.BodyMass = robot_settings->value("Physics/RobotMass").toDouble()
+            - 4 * robotSettings.WheelMass - robotSettings.KickerMass;
+    robotSettings.RobotYawInertia = robot_settings->value("Physics/RobotYawInertia", 0).toDouble();
+    robotSettings.WheelAxialInertia = robot_settings->value("Physics/WheelAxialInertia", 0).toDouble();
+    robotSettings.WheelViscousDamping = robot_settings->value("Physics/WheelViscousDamping", 0).toDouble();
     robotSettings.KickerDampFactor = robot_settings->value("Physics/KickerDampFactor", 0.2f).toDouble();
     robotSettings.RollerTorqueFactor = robot_settings->value("Physics/RollerTorqueFactor", 0.06f).toDouble();
     robotSettings.RollerPerpendicularTorqueFactor = robot_settings->value("Physics/RollerPerpendicularTorqueFactor", 0.005f).toDouble();

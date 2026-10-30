@@ -44,6 +44,7 @@ class Robot
     bool last_state;
 public:    
     ConfigWidget* cfg;
+    RobotSettings settings;
     dSpaceID space;
     PCylinder* chassis;
     PBall* dummy;
@@ -60,6 +61,7 @@ public:
         int id;
         Wheel(Robot* robot,int _id,dReal ang,dReal ang2,int wheeltexid);
         void step();
+        void applyDamping();
         dJointID joint;
         dJointID motor;
         PCylinder* cyl;

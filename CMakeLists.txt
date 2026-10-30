@@ -226,6 +226,18 @@ target_sources(${app} PRIVATE ${srcs})
 install(TARGETS ${app} DESTINATION bin)
 target_link_libraries(${app} ${libs})
 
+option(GRSIM_BUILD_PHYSICS_TESTS "Build robot parameter and ODE regression checks" OFF)
+if(GRSIM_BUILD_PHYSICS_TESTS)
+  enable_testing()
+  set(physics_test_sources ${srcs})
+  list(REMOVE_ITEM physics_test_sources src/main.cpp)
+  add_executable(grsim_physics_test tests/robot_physics.cpp ${physics_test_sources})
+  target_include_directories(grsim_physics_test PRIVATE ${VARTYPES_INCLUDE_DIRS})
+  target_link_libraries(grsim_physics_test ${libs})
+  add_test(NAME robot_physics COMMAND grsim_physics_test ${PROJECT_SOURCE_DIR}/config)
+  set_tests_properties(robot_physics PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+endif()
+
 if(APPLE AND CMAKE_MACOSX_BUNDLE)
   # use CMAKE_MACOSX_BUNDLE if you want to build a mac bundle
   set(MACOSX_BUNDLE_ICON_FILE "${PROJECT_SOURCE_DIR}/resources/icons/grsim.icns")
